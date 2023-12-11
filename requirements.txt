@@ -1,0 +1,6 @@
+amplify
+streamlit
+streamlit_option_menu
+folium
+japanize-matplotlib
+matplotlib

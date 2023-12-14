@@ -11,6 +11,8 @@ import pandas as pd
 from modules import VRProblem
 from modules import MOProblem
 
+apikey = st.secrets["apikey"]
+
 # CSSの設定をする関数
 def set_font_style():
 
@@ -149,8 +151,6 @@ def view_mockup():
     menu = ['【選択してください】', '配送最適化', '献立最適化']
     choice = st.sidebar.selectbox('モードを選択してください', menu)
 
-    txt_apikey = st.sidebar.text_input('APIキー', type='password')
-
     if menu.index(choice) == 0:
         st.info('左側のメニューから「モード」を選択してください')
 
@@ -202,7 +202,7 @@ def view_mockup():
         ind2coord = selected_data.reset_index(drop=True).apply(lambda row: (row[3], row[2]), axis=1).to_dict()
 
         if button_pressed:
-            VRProblem.set_api_key(txt_apikey)
+            VRProblem.set_api_key(apikey)
             best_tour = VRProblem.find_best_tour(selected_data[['Longitude', 'Latitude']].values.tolist(), selected_value)
         else:
             best_tour = None
@@ -276,7 +276,7 @@ def view_mockup():
         goal_data = [calorie_value, protein_value, vitamin_c_value, iron_value]
 
         if button_pressed:
-            MOProblem.set_api_key(txt_apikey)
+            MOProblem.set_api_key(apikey)
             best_menu = MOProblem.find_best_menu(df_read, goal_data)
         else:
             best_menu = None

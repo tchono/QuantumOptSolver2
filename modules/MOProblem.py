@@ -1,7 +1,7 @@
-from amplify import BinaryPoly
-from amplify import gen_symbols, BinaryPoly, BinaryQuadraticModel
-from amplify import Solver
-from amplify.client import FixstarsClient
+from amplify import VariableGenerator
+from amplify import solve
+from amplify import FixstarsClient
+from amplify import Model
 import numpy as np
 import pandas as pd
 
@@ -11,18 +11,13 @@ def set_api_key(key):
     global api_key
     api_key = key
 
-# クライアントの設定
-def create_configured_client():
-    # クライアントの設定
+def get_client(timeout=5000):
     client = FixstarsClient()
     client.token = api_key
-    client.parameters.timeout = 5000  # タイムアウト5秒
-
+    client.parameters.timeout = timeout
     return client
 
-def find_best_menu(data, goal):
-    client = create_configured_client()
-
+def get_model(data, goal):
     num_recipe = len(data)  # レシピ数
     num_nut = len(goal)  # 栄養素の種類数
     num_type = len(data['データ区分'].unique())
@@ -45,13 +40,21 @@ def find_best_menu(data, goal):
     q2 = p @ p.T
     q2 -= np.identity(len(q2))  # 対角成分を 0 にする
 
-    x = gen_symbols(BinaryPoly, num_recipe)
+    gen = VariableGenerator()
+    x = gen.array("Binary", num_recipe)
+
     q3 = q1 + q2
     f = sum(x[i] * q3[i, j] * x[j] for i in range(num_recipe) for j in range(num_recipe))
-    model = BinaryQuadraticModel(f)
+    model = Model(f)
 
-    solver = Solver(client)
-    result = solver.solve(model)
+    return x, model
+
+def find_best_menu(data, goal):
+    x, model = get_model(data, goal)
+
+    # Amplify　ソルバ取得，求解
+    client = get_client()
+    result = solve(model, client)
 
     if len(result.solutions) == 0:
         raise RuntimeError("Some of the constraints are not satisfied.")

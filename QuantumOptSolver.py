@@ -1,4 +1,5 @@
 ### 外部ライブラリをインポートする ###
+from codecs import register_error
 from lib2to3.pgen2.pgen import DFAState
 import streamlit as st
 import japanize_matplotlib
@@ -6,6 +7,7 @@ import matplotlib.pyplot as plt
 import folium
 import numpy as np
 import pandas as pd
+import math
 
 ### 自作のモジュールをインポートする ###
 from modules import VRProblem
@@ -148,7 +150,7 @@ def plot_solution(coord: dict, title: str, best_tour: dict = dict()):
 def view_mockup():
 
     # セレクトボックス（メインメニュー）
-    menu = ['【選択してください】', '配送最適化', '献立最適化']
+    menu = ['【選択してください】', '配送最適化', '献立最適化', '従業員割当問題']
     choice = st.sidebar.selectbox('モードを選択してください', menu)
 
     if menu.index(choice) == 0:
@@ -228,68 +230,61 @@ def view_mockup():
         st.write('などがあります。')
         st.markdown("---")
 
-        num_cols = 4
-        colsA = st.columns(num_cols)
 
-        min_values = [10, 0, 0, 0]
-        max_values = [2000, 100, 30, 30]
-
-        for col_index in range(num_cols):
-            with colsA[col_index]:
-                if col_index == 0:
-                    calorie_value = st.slider('カロリー (kcal)', min_values[0], max_values[0], 700)
-                elif col_index == 1:
-                    protein_value = st.slider('たんぱく質 (g)', min_values[1], max_values[1], 30)
-                elif col_index == 2:
-                    vitamin_c_value = st.slider('ビタミンC (mg)', min_values[2], max_values[2], 10)
-                elif col_index == 3:
-                    iron_value = st.slider('鉄 (mg)', min_values[3], max_values[3], 10)
-                    button_pressed = st.button('✔RUN')
 
         df_read = pd.read_csv("menu_data.csv")
-        unique_vals = df_read['データ区分'].unique()
+        columns = df_read.columns
+        unique_vals = df_read.iloc[:, 0].unique() # データ区分
+        total_nutrients = [0] * (len(columns) - 2) # データ区分と料理名を除く
+        goal_data = [0] * (len(columns) - 2)
+        labels = list(columns[2:]) # データ区分と料理名を除く
+
+        min_values = [math.floor(val * 3) for val in df_read.iloc[:, 2:].min()]
+        max_values = [math.floor(val * 3) for val in df_read.iloc[:, 2:].max()]
+        num_cols = len(total_nutrients)
+        colsA = st.columns(num_cols)
+        for col_index in range(num_cols):
+            with colsA[col_index]:
+                goal_data[col_index] = st.slider(labels[col_index], min_values[col_index], max_values[col_index], int(min_values[col_index] + ((max_values[col_index] + min_values[col_index]) / 3)))
+                if col_index == num_cols - 1:
+                    button_pressed = st.button('✔RUN')
+
         num_cols = len(unique_vals)
         cols = [st.columns(num_cols) for _ in range((len(unique_vals) + num_cols - 1) // num_cols)]
-        # 各栄養素の合計を初期化
-        total_calories = 0
-        total_protein = 0
-        total_vitamin_c = 0
-        total_iron = 0
-
         selected_dish = {}
         for i, val in enumerate(unique_vals):
             col_index = i % num_cols
             with cols[i // num_cols][col_index]:
-                selected_dish[val] = st.selectbox(f'{val}を選択してください:', df_read[df_read['データ区分']==val]['料理名'])
-                selected_row = df_read[(df_read['データ区分']==val) & (df_read['料理名']==selected_dish[val])]
+                selected_dish[val] = st.selectbox(f'{val}を選択してください:', df_read[df_read.iloc[:, 0]==val].iloc[:, 1])
+                selected_row = df_read[(df_read.iloc[:, 0]==val) & (df_read.iloc[:, 1]==selected_dish[val])]
 
                 # 選択されたデータの栄養素を表示
                 st.write(selected_row.transpose()[2:])
 
                 # 各栄養素の合計に追加
-                total_calories += selected_row['カロリー (kcal)'].values[0]
-                total_protein += selected_row['たんぱく質 (g)'].values[0]
-                total_vitamin_c += selected_row['ビタミンC (mg)'].values[0]
-                total_iron += selected_row['鉄 (mg)'].values[0]
-
-        selected_data = [total_calories, total_protein, total_vitamin_c, total_iron]
-        goal_data = [calorie_value, protein_value, vitamin_c_value, iron_value]
+                for i in range(len(total_nutrients)):
+                    total_nutrients[i] += selected_row.iloc[0, i + 2]
 
         if button_pressed:
             MOProblem.set_api_key(apikey)
-            best_menu = MOProblem.find_best_menu(df_read, goal_data)
+            try:
+                best_menu = MOProblem.find_best_menu(df_read, goal_data)
+                if np.sum(np.where(best_menu == 1)[0]) == 0:
+                    raise RuntimeError("制約条件を満たす組み合わせは見つかりませんでした")
+            except:
+                best_menu = None
+                st.warning('制約条件を満たす組み合わせは見つかりませんでした')
         else:
             best_menu = None
 
         st.markdown("---")
-        labels = ['カロリー', 'たんぱく質', 'ビタミンC', '鉄']
 
         def normalize_data(data, max_values):
             return [d / max_val for d, max_val in zip(data, max_values)]
 
         # レーダーチャートの描画
         angles = np.linspace(0, 2 * np.pi, len(labels), endpoint=False).tolist()
-        data = normalize_data(selected_data, max_values) + [selected_data[0] / max_values[0]]
+        data = normalize_data(total_nutrients, max_values) + [total_nutrients[0] / max_values[0]]
         g_data = normalize_data(goal_data, max_values) + [goal_data[0] / max_values[0]]
         angles += angles[:1]
 
@@ -299,6 +294,7 @@ def view_mockup():
         ax.set_yticklabels([])
         ax.set_xticks(angles[:-1])
         ax.set_xticklabels(labels)
+        ax.set_theta_zero_location('N')
 
         # タイトルを設定
         ax.set_title('栄養素比較')
@@ -314,18 +310,17 @@ def view_mockup():
                     st.write(selected_dish[v])
             st.pyplot(plt)
             st.write("■ 合計 ■")
-            st.write(f"カロリー (kcal): {total_calories} / {goal_data[0]}")
-            st.write(f"たんぱく質 (g): {total_protein} / {goal_data[1]}")
-            st.write(f"ビタミンC (mg): {total_vitamin_c} / {goal_data[2]}")
-            st.write(f"鉄 (mg): {total_iron} / {goal_data[3]}")
+            for i in range(len(labels)):
+                st.write(f"{labels[i]}: {total_nutrients[i]} / {goal_data[i]}")
 
         if not best_menu is None:
             indices = np.where(best_menu == 1)[0]
             selected_rows = df_read.iloc[indices]
-            selected_rows_sum = selected_rows.iloc[:, 2:].sum()
-            selected_data = [selected_rows_sum[0], selected_rows_sum[1], selected_rows_sum[2], selected_rows_sum[3]]
-            data2 = normalize_data(selected_data, max_values) + [selected_data[0] / max_values[0]]
+            total_nutrients2 = selected_rows.iloc[:, 2:].sum()
+            total_nutrients2 = list(total_nutrients2.values)
+            data2 = normalize_data(total_nutrients2, max_values) + [total_nutrients2[0] / max_values[0]]
 
+            # レーダーチャートの描画
             plt.figure()
             ax = plt.subplot(111, polar=True)
             ax.fill(angles, data2, color='blue', alpha=0.25)
@@ -333,23 +328,37 @@ def view_mockup():
             ax.set_yticklabels([])
             ax.set_xticks(angles[:-1])
             ax.set_xticklabels(labels)
+            ax.set_theta_zero_location('N')
 
             # タイトルを設定
             ax.set_title('栄養素比較')
 
             with colB:
                 colBA, colBB = st.columns([1, 3])
-                for v in unique_vals:
+                for i in range(len(selected_rows)):
                     with colBA:
-                        st.write(f'{v} ：')
+                        st.write(f'{selected_rows.iloc[i][0]} ：')
                     with colBB:
-                        st.write(selected_rows[selected_rows['データ区分'] == v]['料理名'].values[0])
+                        st.write(selected_rows.iloc[i][1])
                 st.pyplot(plt)
                 st.write("■ 合計 ■")
-                st.write(f"カロリー (kcal): {selected_data[0]} / {goal_data[0]}")
-                st.write(f"たんぱく質 (g): {selected_data[1]} / {goal_data[1]}")
-                st.write(f"ビタミンC (mg): {selected_data[2]} / {goal_data[2]}")
-                st.write(f"鉄 (mg): {selected_data[3]} / {goal_data[3]}")
+                for i in range(len(labels)):
+                    st.write(f"{labels[i]}: {total_nutrients2[i]} / {goal_data[i]}")
+
+    if menu.index(choice) == 3:
+        st.title(menu[3])
+        # 画像のパス
+        image_path = "assets/image/EmployeeAssignmentProblem.png"
+        # 画像を表示
+        st.image(image_path, use_column_width=True)
+        st.write('従業員割当問題とは、各従業員の役職やスキル、希望勤務地と、日々変動する多種多様な業務を考慮して、各店舗に適切に従業員を割り当てる問題です。')
+        st.write('このデモで取り扱う従業員割当問題は、役職やスキルの種類やレベル、役割や希望勤務地に応じた適切な割り当てを行い、各店舗における業務の効率化と店舗間・従業員間の業務量の平準化を目的としています。')
+        st.write('従業員割当問題の具体的な応用先として、')
+        st.write('・　店舗スタッフの適切な配置と業務割り当て')
+        st.write('・　製造業における工場ラインでの作業員配置と役割分担の決定')
+        st.write('・　サービス業におけるレセプションやカスタマーサポートスタッフの日々のスケジュール管理')
+        st.write('などがあります。')
+        st.markdown("---")
 
 
 
